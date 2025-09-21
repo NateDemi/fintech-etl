@@ -58,10 +58,12 @@ async def ingest_csv(
     }
 
 @app.get("/")
+@app.head("/")
 def root():
     return {"status": "ok", "service": "fintech-intake"}
 
 @app.get("/health")
+@app.head("/health")
 def health_check():
     """Simple health check with GCS connectivity test."""
     try:
