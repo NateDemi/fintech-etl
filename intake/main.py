@@ -1,7 +1,5 @@
 import os
 import hashlib
-import csv
-import io
 from datetime import datetime
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header
 from google.cloud import storage
@@ -59,129 +57,22 @@ async def ingest_csv(
         "size": len(contents),
     }
 
-@app.get("/healthz")
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "fintech-intake"}
+
+@app.get("/health")
 def health_check():
-    return {"status": "alive"}
-
-@app.post("/test-gcs")
-async def test_gcs_connection(authorization: str = Header(None)):
-    """Test GCS connection by creating, uploading, and deleting a fake CSV file."""
-    verify_token(authorization)
-    
+    """Simple health check with GCS connectivity test."""
     try:
-        # Create a fake CSV file in memory
-        fake_csv_data = io.StringIO()
-        writer = csv.writer(fake_csv_data)
-        writer.writerow(["test_id", "test_name", "test_value", "timestamp"])
-        writer.writerow(["1", "Test Row 1", "100.50", datetime.utcnow().isoformat()])
-        writer.writerow(["2", "Test Row 2", "200.75", datetime.utcnow().isoformat()])
-        writer.writerow(["3", "Test Row 3", "300.25", datetime.utcnow().isoformat()])
-        
-        csv_content = fake_csv_data.getvalue().encode('utf-8')
-        
-        # Generate object name for test file
-        test_gmail_id = "test-gcs-connection"
-        test_filename = "test-connection.csv"
-        object_name = generate_object_name(test_filename, test_gmail_id, csv_content)
-        
-        # Upload to GCS
+        # Test GCS connection
         storage_client = get_storage_client()
         bucket = storage_client.bucket(BUCKET_NAME)
-        blob = bucket.blob(object_name)
-        blob.upload_from_string(csv_content, content_type="text/csv")
-        
-        # Log the upload
-        upload_log = {
-            "action": "upload",
-            "bucket": BUCKET_NAME,
-            "object": object_name,
-            "size": len(csv_content),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        print(f"GCS Test Upload: {upload_log}")
-        
-        # Delete the test file
-        blob.delete()
-        
-        # Log the deletion
-        delete_log = {
-            "action": "delete",
-            "bucket": BUCKET_NAME,
-            "object": object_name,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        print(f"GCS Test Delete: {delete_log}")
-        
-        return {
-            "status": "success",
-            "message": "GCS connection test completed successfully",
-            "bucket": BUCKET_NAME,
-            "test_object": object_name,
-            "upload_log": upload_log,
-            "delete_log": delete_log
-        }
-        
+        # Just check if we can access the bucket (doesn't require listing)
+        bucket.exists()
+        return {"status": "healthy", "gcs": "connected", "bucket": BUCKET_NAME}
     except Exception as e:
-        error_log = {
-            "action": "error",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        print(f"GCS Test Error: {error_log}")
-        raise HTTPException(status_code=500, detail=f"GCS test failed: {str(e)}")
-
-@app.get("/test-gcs-read")
-async def test_gcs_read_permissions(authorization: str = Header(None)):
-    """Test GCS read permissions by listing bucket contents."""
-    verify_token(authorization)
-    
-    try:
-        storage_client = get_storage_client()
-        bucket = storage_client.bucket(BUCKET_NAME)
-        
-        # Test 1: List objects in bucket
-        blobs = list(bucket.list_blobs(max_results=10))
-        blob_list = []
-        for blob in blobs:
-            blob_list.append({
-                "name": blob.name,
-                "size": blob.size,
-                "created": blob.time_created.isoformat() if blob.time_created else None,
-                "updated": blob.updated.isoformat() if blob.updated else None
-            })
-        
-        # Test 2: Get bucket metadata
-        bucket_metadata = {
-            "name": bucket.name,
-            "location": bucket.location,
-            "storage_class": bucket.storage_class,
-            "time_created": bucket.time_created.isoformat() if bucket.time_created else None
-        }
-        
-        read_log = {
-            "action": "read_test",
-            "bucket": BUCKET_NAME,
-            "objects_found": len(blob_list),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        print(f"GCS Read Test: {read_log}")
-        
-        return {
-            "status": "success",
-            "message": "GCS read permissions test completed successfully",
-            "bucket_metadata": bucket_metadata,
-            "recent_objects": blob_list,
-            "read_log": read_log
-        }
-        
-    except Exception as e:
-        error_log = {
-            "action": "read_error",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        print(f"GCS Read Test Error: {error_log}")
-        raise HTTPException(status_code=500, detail=f"GCS read test failed: {str(e)}")
+        return {"status": "unhealthy", "gcs": "disconnected", "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
