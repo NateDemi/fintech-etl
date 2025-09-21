@@ -130,6 +130,59 @@ async def test_gcs_connection(authorization: str = Header(None)):
         print(f"GCS Test Error: {error_log}")
         raise HTTPException(status_code=500, detail=f"GCS test failed: {str(e)}")
 
+@app.get("/test-gcs-read")
+async def test_gcs_read_permissions(authorization: str = Header(None)):
+    """Test GCS read permissions by listing bucket contents."""
+    verify_token(authorization)
+    
+    try:
+        storage_client = get_storage_client()
+        bucket = storage_client.bucket(BUCKET_NAME)
+        
+        # Test 1: List objects in bucket
+        blobs = list(bucket.list_blobs(max_results=10))
+        blob_list = []
+        for blob in blobs:
+            blob_list.append({
+                "name": blob.name,
+                "size": blob.size,
+                "created": blob.time_created.isoformat() if blob.time_created else None,
+                "updated": blob.updated.isoformat() if blob.updated else None
+            })
+        
+        # Test 2: Get bucket metadata
+        bucket_metadata = {
+            "name": bucket.name,
+            "location": bucket.location,
+            "storage_class": bucket.storage_class,
+            "time_created": bucket.time_created.isoformat() if bucket.time_created else None
+        }
+        
+        read_log = {
+            "action": "read_test",
+            "bucket": BUCKET_NAME,
+            "objects_found": len(blob_list),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        print(f"GCS Read Test: {read_log}")
+        
+        return {
+            "status": "success",
+            "message": "GCS read permissions test completed successfully",
+            "bucket_metadata": bucket_metadata,
+            "recent_objects": blob_list,
+            "read_log": read_log
+        }
+        
+    except Exception as e:
+        error_log = {
+            "action": "read_error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        print(f"GCS Read Test Error: {error_log}")
+        raise HTTPException(status_code=500, detail=f"GCS read test failed: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
