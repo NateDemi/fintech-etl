@@ -17,12 +17,10 @@ def get_storage_client():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Storage client initialization failed: {str(e)}")
 
-def generate_object_name(original_name: str, gmail_id: str, contents: bytes) -> str:
-    """Builds unique object name using date + Gmail message ID + SHA256 hash."""
-    today = datetime.utcnow().strftime("%Y/%m/%d")
-    file_hash = hashlib.sha256(contents).hexdigest()[:12]
+def generate_object_name(original_name: str, gmail_id: str, received_date: str, contents: bytes) -> str:
+    """Builds unique object name using received_date + Gmail message ID + original name."""
     safe_name = original_name.replace(" ", "_")
-    return f"{FOLDER_PREFIX}/{today}/{gmail_id}_{file_hash}_{safe_name}"
+    return f"{FOLDER_PREFIX}/{received_date}_{gmail_id}_{safe_name}"
 
 def verify_token(auth_header: str):
     if not INTAKE_TOKEN:
@@ -37,13 +35,14 @@ def verify_token(auth_header: str):
 async def ingest_csv(
     file: UploadFile = File(...),
     gmail_id: str = Form(...),
+    received_date: str = Form(...),
     original_name: str = Form(...),
     authorization: str = Header(None),
 ):
     """Receive CSV attachment and upload to GCS."""
     verify_token(authorization)
     contents = await file.read()
-    object_name = generate_object_name(original_name, gmail_id, contents)
+    object_name = generate_object_name(original_name, gmail_id, received_date, contents)
 
     storage_client = get_storage_client()
     bucket = storage_client.bucket(BUCKET_NAME)
