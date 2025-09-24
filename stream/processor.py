@@ -2,9 +2,12 @@
 CSV processor that transforms vendor invoice data to receipt schema
 """
 import pandas as pd
+import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 from .schema import ReceiptData, LineItem, ProcessedReceipt
+
+logger = logging.getLogger(__name__)
 
 class CSVToReceiptProcessor:
     """Processes vendor invoice CSV data and transforms it to receipt schema"""
@@ -12,19 +15,19 @@ class CSVToReceiptProcessor:
     def __init__(self, gcs_bucket: str):
         self.gcs_bucket = gcs_bucket
     
-    def process_vendor_invoice(self, csv_data: pd.DataFrame, gcs_path: str) -> ProcessedReceipt:
+    def process_vendor_invoice(self, csv_data: pd.DataFrame, gcs_path: str, google_drive_url: str = None) -> ProcessedReceipt:
         """Transform vendor invoice CSV data to receipt schema"""
         # Group by invoice to create receipt data
         invoice_groups = csv_data.groupby('Invoice Number')
         
         receipts = []
         for invoice_number, invoice_data in invoice_groups:
-            receipt = self._create_receipt_from_invoice(invoice_data, invoice_number, gcs_path)
+            receipt = self._create_receipt_from_invoice(invoice_data, invoice_number, gcs_path, google_drive_url)
             receipts.append(receipt)
         
         return receipts[0] if receipts else None
     
-    def _create_receipt_from_invoice(self, invoice_data: pd.DataFrame, invoice_number: str, gcs_path: str) -> ProcessedReceipt:
+    def _create_receipt_from_invoice(self, invoice_data: pd.DataFrame, invoice_number: str, gcs_path: str, google_drive_url: str = None) -> ProcessedReceipt:
         """Create a single receipt from invoice data"""
         
         # Get invoice-level data (should be same for all rows)
@@ -46,6 +49,14 @@ class CSVToReceiptProcessor:
         gmail_id = gcs_path.split('_')[1] if '_' in gcs_path else "unknown"
         google_drive_folder_id = "1-79sAJHmIIvYU4NDCUK99GbBoLZhdr-I"  # Your specific Google Drive folder
         
+        # Use real Google Drive URL if provided, otherwise generate one
+        if google_drive_url:
+            final_google_drive_url = google_drive_url
+            logger.info(f"🔗 Using real Google Drive URL: {google_drive_url}")
+        else:
+            final_google_drive_url = f"https://drive.google.com/file/d/{gmail_id}/view?folderId={google_drive_folder_id}"
+            logger.info(f"⚠️ No real Google Drive URL provided, generated: {final_google_drive_url}")
+        
         source_info = {
             "gcs_path": f"gs://{self.gcs_bucket}/{gcs_path}",
             "gmail_id": gmail_id,
@@ -55,7 +66,7 @@ class CSVToReceiptProcessor:
             "google_drive_folder_id": google_drive_folder_id,
             "google_drive_file_url": f"https://drive.google.com/file/d/{gmail_id}/view",
             "google_drive_folder_url": f"https://drive.google.com/drive/folders/{google_drive_folder_id}",
-            "google_drive_url": f"https://drive.google.com/file/d/{gmail_id}/view?folderId={google_drive_folder_id}"
+            "google_drive_url": final_google_drive_url
         }
         
         receipt_data = ReceiptData(

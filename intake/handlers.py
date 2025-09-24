@@ -42,11 +42,12 @@ async def ingest_csv_handler(
     gmail_id: str,
     received_date: str,
     original_name: str,
-    authorization: str,
-    background_tasks: BackgroundTasks,
-    gcs_bucket: str,
-    intake_token: str,
-    process_csv_direct_func
+    google_drive_url: str = None,
+    authorization: str = None,
+    background_tasks: BackgroundTasks = None,
+    gcs_bucket: str = None,
+    intake_token: str = None,
+    process_csv_direct_func = None
 ):
     """Handle CSV intake from Gmail and process directly"""
     logger.info(f"📥 Received CSV intake request: {original_name} (Gmail ID: {gmail_id})")
@@ -73,7 +74,7 @@ async def ingest_csv_handler(
 
     # Process CSV directly from memory (no GCS download needed)
     if background_tasks and process_csv_direct_func:
-        background_tasks.add_task(process_csv_direct_func, contents, object_name, gcs_bucket)
+        background_tasks.add_task(process_csv_direct_func, contents, object_name, gcs_bucket, google_drive_url)
 
     return {
         "status": "success",
@@ -81,5 +82,6 @@ async def ingest_csv_handler(
         "gcs_path": f"gs://{gcs_bucket}/{object_name}",
         "gmail_id": gmail_id,
         "original_name": original_name,
+        "google_drive_url": google_drive_url,
         "processing": "direct_stream"
     }
