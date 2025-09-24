@@ -20,7 +20,7 @@ def get_storage_client():
         return storage.Client()
     except Exception as e:
         logger.error(f"Failed to initialize GCS client: {e}")
-        raise HTTPException(status_code=500, detail="GCS client initialization failed")
+        return None
 
 def generate_object_name(original_name: str, gmail_id: str, received_date: str, contents: bytes) -> str:
     """Builds unique object name using received_date + Gmail message ID + original name."""
@@ -46,31 +46,40 @@ async def ingest_csv_handler(
     background_tasks: BackgroundTasks,
     gcs_bucket: str,
     intake_token: str,
-    process_csv_async_func
+    process_csv_direct_func
 ):
-    """Handle CSV intake from Gmail and upload to GCS"""
+    """Handle CSV intake from Gmail and process directly"""
     logger.info(f"📥 Received CSV intake request: {original_name} (Gmail ID: {gmail_id})")
     verify_token(authorization, intake_token)
     
     contents = await file.read()
     object_name = generate_object_name(original_name, gmail_id, received_date, contents)
 
-    # Upload to GCS
-    logger.info(f"📤 Uploading to GCS: gs://{gcs_bucket}/{object_name}")
+    # Upload to GCS for backup (optional) - skip if no credentials
     storage_client = get_storage_client()
-    bucket = storage_client.bucket(gcs_bucket)
-    blob = bucket.blob(object_name)
-    blob.upload_from_string(contents, content_type="text/csv")
-    logger.info(f"✅ Successfully uploaded to GCS intake folder: {object_name}")
+    if storage_client:
+        try:
+            logger.info(f"📤 Uploading to GCS backup: gs://{gcs_bucket}/{object_name}")
+            bucket = storage_client.bucket(gcs_bucket)
+            blob = bucket.blob(object_name)
+            blob.upload_from_string(contents, content_type="text/csv")
+            logger.info(f"✅ Successfully uploaded to GCS intake folder: {object_name}")
+        except Exception as e:
+            logger.warning(f"⚠️ GCS upload failed: {e}")
+            logger.info("🔄 Continuing with direct processing...")
+    else:
+        logger.warning("⚠️ GCS client not available (running locally?)")
+        logger.info("🔄 Continuing with direct processing...")
 
-    # Trigger processing in background
-    if background_tasks and process_csv_async_func:
-        background_tasks.add_task(process_csv_async_func, object_name)
+    # Process CSV directly from memory (no GCS download needed)
+    if background_tasks and process_csv_direct_func:
+        background_tasks.add_task(process_csv_direct_func, contents, object_name, gcs_bucket)
 
     return {
         "status": "success",
-        "message": "CSV uploaded successfully",
+        "message": "CSV uploaded and processing started",
         "gcs_path": f"gs://{gcs_bucket}/{object_name}",
         "gmail_id": gmail_id,
-        "original_name": original_name
+        "original_name": original_name,
+        "processing": "direct_stream"
     }

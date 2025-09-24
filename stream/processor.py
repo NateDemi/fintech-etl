@@ -42,9 +42,24 @@ class CSVToReceiptProcessor:
         subtotal = sum(item.price * item.qty for item in line_items)
         sales_tax = max(0, total_amount - subtotal)  # Assume difference is tax
         
-        # Create receipt data
+        # Create receipt data with detailed source information
+        gmail_id = gcs_path.split('_')[1] if '_' in gcs_path else "unknown"
+        google_drive_folder_id = "1-79sAJHmIIvYU4NDCUK99GbBoLZhdr-I"  # Your specific Google Drive folder
+        
+        source_info = {
+            "gcs_path": f"gs://{self.gcs_bucket}/{gcs_path}",
+            "gmail_id": gmail_id,
+            "received_date": gcs_path.split('_')[0] if '_' in gcs_path else "unknown",
+            "original_filename": gcs_path.split('_', 2)[-1] if '_' in gcs_path else gcs_path,
+            "source_type": "gmail_attachment",
+            "google_drive_folder_id": google_drive_folder_id,
+            "google_drive_file_url": f"https://drive.google.com/file/d/{gmail_id}/view",
+            "google_drive_folder_url": f"https://drive.google.com/drive/folders/{google_drive_folder_id}",
+            "google_drive_url": f"https://drive.google.com/file/d/{gmail_id}/view?folderId={google_drive_folder_id}"
+        }
+        
         receipt_data = ReceiptData(
-            source_file=f"gs://{self.gcs_bucket}/{gcs_path}",
+            source_file=source_info["google_drive_url"],
             receiptId=str(invoice_number),
             vendor=first_row.get('Vendor Name', 'Unknown Vendor'),
             date=self._parse_date(first_row.get('Invoice Date', '')).isoformat(),
