@@ -19,10 +19,22 @@ from pydantic_settings import BaseSettings
 
 from stream.schema import ProcessedReceipt
 from stream.processor import CSVToReceiptProcessor
+from intake.handlers import ingest_csv_handler
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging for Cloud Run
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Add startup logging
+logger.info("🚀 Starting Fintech ETL Service")
+logger.info(f"📦 GCS Bucket: {settings.gcs_bucket}")
+logger.info(f"🔗 Webhook URL: {settings.webhook_url[:50] + '...' if settings.webhook_url else 'Not configured'}")
 
 class Settings(BaseSettings):
     # GCS Configuration
@@ -45,9 +57,6 @@ class Settings(BaseSettings):
 settings = Settings()
 app = FastAPI(title="Fintech ETL Service", version="1.0.0")
 
-# Constants
-FOLDER_PREFIX = "raw"
-
 def get_storage_client():
     """Get storage client, initializing only when needed."""
     try:
@@ -55,21 +64,6 @@ def get_storage_client():
     except Exception as e:
         logger.error(f"Failed to initialize GCS client: {e}")
         raise HTTPException(status_code=500, detail=f"Storage client initialization failed: {str(e)}")
-
-def generate_object_name(original_name: str, gmail_id: str, received_date: str, contents: bytes) -> str:
-    """Builds unique object name using received_date + Gmail message ID + original name."""
-    safe_name = original_name.replace(" ", "_")
-    return f"{FOLDER_PREFIX}/{received_date}_{gmail_id}_{safe_name}"
-
-def verify_token(auth_header: str):
-    """Verify authorization token if configured"""
-    if not settings.intake_token:
-        return  # no token configured
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = auth_header.split(" ", 1)[1]
-    if token != settings.intake_token:
-        raise HTTPException(status_code=403, detail="Invalid bearer token")
 
 # ============================================================================
 # INTAKE ENDPOINTS (Gmail to GCS)
@@ -85,27 +79,17 @@ async def ingest_csv(
     background_tasks: BackgroundTasks = None
 ):
     """Receive CSV attachment and upload to GCS, then trigger processing"""
-    verify_token(authorization)
-    contents = await file.read()
-    object_name = generate_object_name(original_name, gmail_id, received_date, contents)
-
-    # Upload to GCS
-    storage_client = get_storage_client()
-    bucket = storage_client.bucket(settings.gcs_bucket)
-    blob = bucket.blob(object_name)
-    blob.upload_from_string(contents, content_type="text/csv")
-
-    # Trigger processing in background
-    if background_tasks:
-        background_tasks.add_task(process_csv_async, object_name)
-
-    return {
-        "status": "ok",
-        "bucket": settings.gcs_bucket,
-        "object": object_name,
-        "size": len(contents),
-        "processing": "triggered"
-    }
+    return await ingest_csv_handler(
+        file=file,
+        gmail_id=gmail_id,
+        received_date=received_date,
+        original_name=original_name,
+        authorization=authorization,
+        background_tasks=background_tasks,
+        gcs_bucket=settings.gcs_bucket,
+        intake_token=settings.intake_token,
+        process_csv_async_func=process_csv_async
+    )
 
 # ============================================================================
 # PROCESSING ENDPOINTS (CSV to Webhook)
@@ -302,10 +286,12 @@ def root():
 @app.head("/health")
 def health_check():
     """Health check with GCS connectivity test"""
+    logger.info("🏥 Health check requested")
     try:
         storage_client = get_storage_client()
         bucket = storage_client.bucket(settings.gcs_bucket)
-        bucket.exists()  # Check if bucket is accessible
+        bucket_exists = bucket.exists()  # Check if bucket is accessible
+        logger.info(f"💚 Health check result: healthy (GCS connected: {bucket_exists})")
         return {
             "status": "healthy", 
             "gcs": "connected", 
