@@ -33,8 +33,6 @@ logger = logging.getLogger(__name__)
 
 # Add startup logging
 logger.info("🚀 Starting Fintech ETL Service")
-logger.info(f"📦 GCS Bucket: {settings.gcs_bucket}")
-logger.info(f"🔗 Webhook URL: {settings.webhook_url[:50] + '...' if settings.webhook_url else 'Not configured'}")
 
 class Settings(BaseSettings):
     # GCS Configuration
@@ -55,7 +53,11 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra environment variables
 
 settings = Settings()
-app = FastAPI(title="Fintech ETL Service", version="1.0.0")
+app = FastAPI(title="Fintisech ETL Service", version="1.0.0")
+
+# Log configuration after settings are loaded
+logger.info(f"📦 GCS Bucket: {settings.gcs_bucket}")
+logger.info(f"🔗 Webhook URL: {settings.webhook_url[:50] + '...' if settings.webhook_url else 'Not configured'}")
 
 def get_storage_client():
     """Get storage client, initializing only when needed."""
@@ -78,7 +80,7 @@ async def ingest_csv(
     authorization: str = Header(None),
     background_tasks: BackgroundTasks = None
 ):
-    """Receive CSV attachment and upload to GCS, then trigger processing"""
+    """Receive CSV attachment and process directly (stream on the fly)"""
     return await ingest_csv_handler(
         file=file,
         gmail_id=gmail_id,
@@ -88,7 +90,7 @@ async def ingest_csv(
         background_tasks=background_tasks,
         gcs_bucket=settings.gcs_bucket,
         intake_token=settings.intake_token,
-        process_csv_async_func=process_csv_async
+        process_csv_direct_func=process_csv_direct
     )
 
 # ============================================================================
@@ -112,8 +114,85 @@ async def process_csv_file(
         logger.error(f"Failed to start processing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def process_csv_direct(csv_contents: bytes, gcs_path: str, gcs_bucket: str):
+    """Direct processing of CSV from memory (no GCS download needed)"""
+    try:
+        logger.info(f"🚀 Starting direct processing of {gcs_path}")
+        
+        # Save CSV locally for debugging
+        local_filename = f"local_csvs/{gcs_path.split('/')[-1]}"
+        os.makedirs("local_csvs", exist_ok=True)
+        with open(local_filename, 'wb') as f:
+            f.write(csv_contents)
+        logger.info(f"💾 Saved CSV locally: {local_filename}")
+        
+        # Process CSV directly from memory
+        csv_content = csv_contents.decode('utf-8')
+        from io import StringIO
+        df = pd.read_csv(StringIO(csv_content))
+        
+        logger.info(f"📊 Loaded CSV with {len(df)} rows")
+        logger.info(f"📋 CSV columns: {list(df.columns)}")
+        logger.info(f"📄 First few rows:\n{df.head()}")
+        
+        # Stream CSV data to console with source information
+        print("\n" + "="*80)
+        print(f"🔄 STREAMING CSV DATA: {gcs_path}")
+        print("="*80)
+        print(f"📁 Local File: {local_filename}")
+        print(f"📊 Rows: {len(df)}")
+        print(f"📋 Columns: {len(df.columns)}")
+        
+        # Extract source information from gcs_path
+        path_parts = gcs_path.split('_')
+        if len(path_parts) >= 3:
+            received_date = path_parts[0]
+            gmail_id = path_parts[1]
+            original_filename = '_'.join(path_parts[2:])
+            google_drive_folder_id = "1-79sAJHmIIvYU4NDCUK99GbBoLZhdr-I"
+            google_drive_file_url = f"https://drive.google.com/file/d/{gmail_id}/view"
+            google_drive_folder_url = f"https://drive.google.com/drive/folders/{google_drive_folder_id}"
+            google_drive_url = f"https://drive.google.com/file/d/{gmail_id}/view?folderId={google_drive_folder_id}"
+            
+            print(f"\n📧 SOURCE INFORMATION:")
+            print(f"   📅 Received Date: {received_date}")
+            print(f"   📧 Gmail ID: {gmail_id}")
+            print(f"   📄 Original Filename: {original_filename}")
+            print(f"   📁 Google Drive Folder ID: {google_drive_folder_id}")
+            print(f"   🔗 Google Drive File URL: {google_drive_file_url}")
+            print(f"   📂 Google Drive Folder URL: {google_drive_folder_url}")
+            print(f"   🔗 Google Drive URL (with folder): {google_drive_url}")
+        
+        print("\n📄 CSV Content:")
+        print("-" * 80)
+        print(df.to_string(index=False))
+        print("-" * 80)
+        print("✅ CSV data streamed to console")
+        print("="*80 + "\n")
+        
+        # Process CSV to receipt schema
+        processor = CSVToReceiptProcessor(gcs_bucket)
+        processed_receipt = processor.process_vendor_invoice(df, gcs_path)
+        
+        if not processed_receipt:
+            logger.warning(f"⚠️ No receipt data generated from {gcs_path}")
+            return
+        
+        logger.info(f"✅ Processed receipt: {processed_receipt.receipt_id} from {processed_receipt.vendor}")
+        
+        # Skip storage for local testing - go straight to webhook
+        logger.info("🚀 Skipping storage for local testing, streaming to webhook...")
+        
+        # Send to webhook if configured
+        await send_to_webhook(processed_receipt)
+        
+        logger.info(f"🎉 Successfully completed direct processing {gcs_path}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to process {gcs_path}: {e}")
+
 async def process_csv_async(gcs_path: str):
-    """Async processing of CSV file"""
+    """Legacy async processing of CSV file from GCS (for backward compatibility)"""
     try:
         logger.info(f"🔄 Starting background processing of {gcs_path}")
         
