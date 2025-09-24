@@ -115,7 +115,7 @@ async def process_csv_file(
 async def process_csv_async(gcs_path: str):
     """Async processing of CSV file"""
     try:
-        logger.info(f"Starting processing of {gcs_path}")
+        logger.info(f"🔄 Starting background processing of {gcs_path}")
         
         # Download CSV from GCS
         storage_client = get_storage_client()
@@ -126,15 +126,17 @@ async def process_csv_async(gcs_path: str):
         csv_content = blob.download_as_text()
         df = pd.read_csv(pd.StringIO(csv_content))
         
-        logger.info(f"Loaded CSV with {len(df)} rows")
+        logger.info(f"📊 Loaded CSV with {len(df)} rows")
         
         # Process CSV to receipt schema
         processor = CSVToReceiptProcessor(settings.gcs_bucket)
         processed_receipt = processor.process_vendor_invoice(df, gcs_path)
         
         if not processed_receipt:
-            logger.warning(f"No receipt data generated from {gcs_path}")
+            logger.warning(f"⚠️ No receipt data generated from {gcs_path}")
             return
+        
+        logger.info(f"✅ Processed receipt: {processed_receipt.receipt_id} from {processed_receipt.vendor}")
         
         # Store processed receipt
         await store_processed_receipt(processed_receipt)
@@ -145,10 +147,10 @@ async def process_csv_async(gcs_path: str):
         # Send to webhook if configured
         await send_to_webhook(processed_receipt)
         
-        logger.info(f"Successfully processed {gcs_path}")
+        logger.info(f"🎉 Successfully completed processing {gcs_path}")
         
     except Exception as e:
-        logger.error(f"Failed to process {gcs_path}: {e}")
+        logger.error(f"❌ Failed to process {gcs_path}: {e}")
 
 # ============================================================================
 # WEBHOOK FUNCTIONALITY
@@ -192,13 +194,18 @@ def convert_to_webhook_schema(processed_receipt: ProcessedReceipt) -> dict:
 
 async def send_to_webhook(processed_receipt: ProcessedReceipt):
     """Send processed receipt to webhook endpoint"""
+    logger.info(f"🔗 Attempting to send receipt {processed_receipt.receipt_id} to webhook")
+    
     if not settings.webhook_url:
-        logger.info("No webhook URL configured, skipping webhook send")
+        logger.info("❌ No webhook URL configured, skipping webhook send")
         return
+    
+    logger.info(f"🌐 Webhook URL: {settings.webhook_url}")
     
     try:
         # Convert to webhook schema
         webhook_payload = convert_to_webhook_schema(processed_receipt)
+        logger.info(f"📦 Webhook payload prepared: {len(webhook_payload)} fields")
         
         # Prepare headers
         headers = {
@@ -208,6 +215,7 @@ async def send_to_webhook(processed_receipt: ProcessedReceipt):
         headers.update(settings.webhook_headers)
         
         # Send to webhook
+        logger.info(f"🚀 Sending to webhook: {settings.webhook_url}")
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 settings.webhook_url,
@@ -215,13 +223,15 @@ async def send_to_webhook(processed_receipt: ProcessedReceipt):
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30)
             ) as response:
+                response_text = await response.text()
                 if response.status >= 200 and response.status < 300:
-                    logger.info(f"Successfully sent receipt {processed_receipt.receipt_id} to webhook")
+                    logger.info(f"✅ Successfully sent receipt {processed_receipt.receipt_id} to webhook")
+                    logger.info(f"📡 Webhook response: {response_text}")
                 else:
-                    logger.error(f"Webhook returned status {response.status}: {await response.text()}")
+                    logger.error(f"❌ Webhook returned status {response.status}: {response_text}")
                     
     except Exception as e:
-        logger.error(f"Failed to send receipt to webhook: {e}")
+        logger.error(f"❌ Failed to send receipt to webhook: {e}")
 
 # ============================================================================
 # STORAGE AND PUB/SUB FUNCTIONS
