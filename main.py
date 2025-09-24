@@ -77,6 +77,7 @@ async def ingest_csv(
     gmail_id: str = Form(...),
     received_date: str = Form(...),
     original_name: str = Form(...),
+    google_drive_url: str = Form(None),
     authorization: str = Header(None),
     background_tasks: BackgroundTasks = None
 ):
@@ -86,6 +87,7 @@ async def ingest_csv(
         gmail_id=gmail_id,
         received_date=received_date,
         original_name=original_name,
+        google_drive_url=google_drive_url,
         authorization=authorization,
         background_tasks=background_tasks,
         gcs_bucket=settings.gcs_bucket,
@@ -114,7 +116,7 @@ async def process_csv_file(
         logger.error(f"Failed to start processing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def process_csv_direct(csv_contents: bytes, gcs_path: str, gcs_bucket: str):
+async def process_csv_direct(csv_contents: bytes, gcs_path: str, gcs_bucket: str, google_drive_url: str = None):
     """Direct processing of CSV from memory (no GCS download needed)"""
     try:
         logger.info(f"🚀 Starting direct processing of {gcs_path}")
@@ -172,7 +174,7 @@ async def process_csv_direct(csv_contents: bytes, gcs_path: str, gcs_bucket: str
         
         # Process CSV to receipt schema
         processor = CSVToReceiptProcessor(gcs_bucket)
-        processed_receipt = processor.process_vendor_invoice(df, gcs_path)
+        processed_receipt = processor.process_vendor_invoice(df, gcs_path, google_drive_url)
         
         if not processed_receipt:
             logger.warning(f"⚠️ No receipt data generated from {gcs_path}")
@@ -285,6 +287,7 @@ async def send_to_webhook(processed_receipt: ProcessedReceipt):
         # Convert to webhook schema
         webhook_payload = convert_to_webhook_schema(processed_receipt)
         logger.info(f"📦 Webhook payload prepared: {len(webhook_payload)} fields")
+        logger.info(f"🔍 Source file in webhook: {webhook_payload.get('source_file', 'NOT_FOUND')}")
         
         # Prepare headers
         headers = {
