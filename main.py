@@ -279,7 +279,9 @@ async def publish_receipt_event(receipt: ProcessedReceipt):
 
 @app.get("/")
 @app.head("/")
+@app.post("/")
 def root():
+    logger.info("🏠 Root endpoint accessed")
     return {"status": "ok", "service": "fintech-etl"}
 
 @app.get("/health")
