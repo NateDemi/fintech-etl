@@ -50,6 +50,13 @@ class WebhookClient:
 
 def to_webhook_schema(r: ProcessedReceipt) -> dict:
     """Map internal model -> webhook schema."""
+    # Extract email ID from GCS path (format: intake/YYYYMMDD_gmail_id_filename.csv)
+    docupanda_id = "unknown"
+    if hasattr(r, 'gcs_path') and r.gcs_path:
+        path_parts = r.gcs_path.split('/')[-1].split('_')  # Get filename and split by underscore
+        if len(path_parts) >= 2:
+            docupanda_id = path_parts[1]  # gmail_id is the second part
+    
     return {
         "receiptId": r.receipt_id,
         "vendor": r.vendor,
@@ -58,6 +65,7 @@ def to_webhook_schema(r: ProcessedReceipt) -> dict:
         "salesTax": r.sales_tax,
         "subtotal": r.subtotal,
         "itemCount": r.item_count,
+        "docupanda_id": docupanda_id,  # Email ID extracted from GCS path
         "lineItems": [
             {
                 "name": li.name,
