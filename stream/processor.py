@@ -46,26 +46,26 @@ class CSVToReceiptProcessor:
         sales_tax = max(0, total_amount - subtotal)  # Assume difference is tax
         
         # Create receipt data with detailed source information
-        gmail_id = gcs_path.split('_')[1] if '_' in gcs_path else "unknown"
-        google_drive_folder_id = "1-79sAJHmIIvYU4NDCUK99GbBoLZhdr-I"  # Your specific Google Drive folder
+        # Extract Gmail ID from gcs_path (format: intake/YYYYMMDD_gmail_id_filename.csv)
+        path_parts = gcs_path.split('/')[-1].split('_')  # Get filename and split by underscore
+        gmail_id = path_parts[1] if len(path_parts) >= 2 else "unknown"
+        received_date = path_parts[0] if len(path_parts) >= 1 else "unknown"
+        original_filename = '_'.join(path_parts[2:]) if len(path_parts) >= 3 else gcs_path.split('/')[-1]
         
-        # Use real Google Drive URL if provided, otherwise generate one
-        if google_drive_url:
-            final_google_drive_url = google_drive_url
-            logger.info(f"🔗 Using real Google Drive URL: {google_drive_url}")
+        if google_drive_url and google_drive_url.strip():
+            final_google_drive_url = google_drive_url.strip()
+            logger.info(f"🔗 Using real Google Drive URL from AppleScript: {final_google_drive_url}")
         else:
-            final_google_drive_url = f"https://drive.google.com/file/d/{gmail_id}/view?folderId={google_drive_folder_id}"
-            logger.info(f"⚠️ No real Google Drive URL provided, generated: {final_google_drive_url}")
+            # Fallback: use GCS path instead of fake Google Drive URL
+            final_google_drive_url = f"gs://{self.gcs_bucket}/{gcs_path}"
+            logger.warning(f"⚠️ No real Google Drive URL provided, using GCS path: {final_google_drive_url}")
         
         source_info = {
             "gcs_path": f"gs://{self.gcs_bucket}/{gcs_path}",
             "gmail_id": gmail_id,
-            "received_date": gcs_path.split('_')[0] if '_' in gcs_path else "unknown",
-            "original_filename": gcs_path.split('_', 2)[-1] if '_' in gcs_path else gcs_path,
+            "received_date": received_date,
+            "original_filename": original_filename,
             "source_type": "gmail_attachment",
-            "google_drive_folder_id": google_drive_folder_id,
-            "google_drive_file_url": f"https://drive.google.com/file/d/{gmail_id}/view",
-            "google_drive_folder_url": f"https://drive.google.com/drive/folders/{google_drive_folder_id}",
             "google_drive_url": final_google_drive_url
         }
         

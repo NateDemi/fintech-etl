@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY main.py .
 COPY stream/ ./stream/
+COPY intake/ ./intake/
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app \
