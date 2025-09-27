@@ -31,21 +31,31 @@ class WebhookClient:
         return bool(self.url)
 
     async def send(self, receipt: ProcessedReceipt) -> None:
+        logger.info(f"🔗 Webhook send attempt for receipt {receipt.receipt_id}")
+        
         if not self.is_configured():
-            logger.info("Webhook not configured; skipping send.")
+            logger.warning("⚠️ Webhook not configured; skipping send.")
             return
 
         payload = to_webhook_schema(receipt)
+        logger.info(f"📦 Webhook payload prepared: {len(str(payload))} chars")
+        logger.info(f"🎯 Sending to URL: {self.url}")
+        logger.info(f"📋 Payload preview: {str(payload)[:200]}...")
+        
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                logger.info("🌐 Making HTTP POST request to webhook...")
                 async with session.post(self.url, json=payload, headers=self.headers) as resp:
                     text = await resp.text()
+                    logger.info(f"📡 Webhook response: status={resp.status}, body_length={len(text)}")
+                    
                     if 200 <= resp.status < 300:
-                        logger.info("Webhook ok for receipt %s (status=%s)", receipt.receipt_id, resp.status)
+                        logger.info("✅ Webhook SUCCESS for receipt %s (status=%s)", receipt.receipt_id, resp.status)
+                        logger.info(f"📄 Response body: {text[:200]}...")
                     else:
-                        logger.error("Webhook error status=%s body=%s", resp.status, text)
+                        logger.error("❌ Webhook ERROR status=%s body=%s", resp.status, text)
         except Exception as e:
-            logger.exception("Webhook send failed: %s", e)
+            logger.error(f"💥 Webhook send FAILED: {e}", exc_info=True)
 
 
 def to_webhook_schema(r: ProcessedReceipt) -> dict:
@@ -115,23 +125,38 @@ async def process_csv_from_bytes(
     Returns the ProcessedReceipt (or None if no data).
     """
     try:
+        logger.info(f"🔄 Starting CSV processing for path: {gcs_path}")
+        logger.info(f"📊 CSV bytes: {len(csv_bytes)} bytes")
+        logger.info(f"🔗 Human source URL: {human_source_url}")
+        logger.info(f"🌐 Webhook configured: {webhook.is_configured()}")
+        
         df = _read_csv_from_bytes(csv_bytes)
-        logger.info("CSV loaded rows=%d cols=%d (path=%s)", len(df), len(df.columns), gcs_path)
+        logger.info(f"📈 CSV loaded: {len(df)} rows, {len(df.columns)} columns")
+        logger.info(f"📋 CSV columns: {list(df.columns)}")
 
         processor = CSVToReceiptProcessor(gcs_bucket)
+        logger.info("⚙️ Processing vendor invoice...")
         receipt = processor.process_vendor_invoice(df, gcs_path, human_source_url)
+        
         if not receipt:
-            logger.warning("No receipt produced for %s", gcs_path)
+            logger.warning("⚠️ No receipt produced for %s", gcs_path)
             return None
 
+        logger.info(f"✅ Receipt created: ID={receipt.receipt_id}, Vendor={receipt.vendor}")
         _ensure_source_fields(receipt, gcs_bucket, gcs_path, human_source_url)
+        logger.info(f"🔗 Source file set to: {receipt.source_file}")
 
         if webhook.is_configured():
+            logger.info("🚀 Sending receipt to webhook...")
             await webhook.send(receipt)
+        else:
+            logger.warning("⚠️ Webhook not configured - skipping send")
+            
+        logger.info(f"🎉 Processing completed successfully for receipt {receipt.receipt_id}")
         return receipt
 
     except Exception as e:
-        logger.exception("Failed processing %s: %s", gcs_path, e)
+        logger.error(f"💥 Failed processing {gcs_path}: {e}", exc_info=True)
         return None
 
 

@@ -72,12 +72,24 @@ async def ingest_csv_handler(
         logger.warning("⚠️ GCS client not available (running locally?)")
         logger.info("🔄 Continuing with direct processing...")
 
-    # Process CSV directly from memory (no GCS download needed)
     if background_tasks and process_csv_direct_func:
-        # Create a wrapper function that properly awaits the async function
+        logger.info("🚀 Starting background processing task...")
+        logger.info(f"📊 CSV size: {len(contents)} bytes")
+        logger.info(f"📁 GCS path: gs://{gcs_bucket}/{object_name}")
+        logger.info(f"🔗 Google Drive URL: {google_drive_url}")
+        
         async def process_wrapper():
-            await process_csv_direct_func(contents, object_name, gcs_bucket, google_drive_url)
+            try:
+                logger.info("⚙️ Background task started - calling process_csv_direct_func")
+                result = await process_csv_direct_func(contents, object_name, gcs_bucket, google_drive_url)
+                logger.info(f"✅ Background processing completed. Result: {result}")
+            except Exception as e:
+                logger.error(f"❌ Background processing failed: {e}", exc_info=True)
+        
         background_tasks.add_task(process_wrapper)
+        logger.info("📋 Background task queued successfully")
+    else:
+        logger.warning("⚠️ No background tasks or processing function available")
 
     return {
         "status": "success",
