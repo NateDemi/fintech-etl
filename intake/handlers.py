@@ -74,7 +74,10 @@ async def ingest_csv_handler(
 
     # Process CSV directly from memory (no GCS download needed)
     if background_tasks and process_csv_direct_func:
-        background_tasks.add_task(process_csv_direct_func, contents, object_name, gcs_bucket, google_drive_url)
+        # Create a wrapper function that properly awaits the async function
+        async def process_wrapper():
+            await process_csv_direct_func(contents, object_name, gcs_bucket, google_drive_url)
+        background_tasks.add_task(process_wrapper)
 
     return {
         "status": "success",
