@@ -70,7 +70,7 @@ def to_webhook_schema(r: ProcessedReceipt) -> dict:
     return {
         "receiptId": r.receipt_id,
         "vendor": r.vendor,
-        "transactionDate": r.transaction_date,  # if this is a date/datetime, your Pydantic model should json-encode it
+        "transactionDate": r.transaction_date.isoformat() if r.transaction_date else None,  # Convert date to ISO string
         "totalAmount": r.total_amount,
         "salesTax": r.sales_tax,
         "subtotal": r.subtotal,
