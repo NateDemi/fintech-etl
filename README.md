@@ -132,4 +132,4 @@ The service sends data in this exact format to your webhook:
 2. **GCS → Processing:** Service processes CSV to receipt schema
 3. **Processing → Webhook:** Sends structured data to your webhook
 4. **Processing → Storage:** Stores processed receipts in GCS
-5. **Processing → Pub/Sub:** Publishes events for downstream systems
+5. **Processing → Pub/Sub:** Publishes events for downstream systems# Trigger build
