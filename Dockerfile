@@ -26,10 +26,10 @@ RUN useradd --create-home --shell /bin/bash app \
 USER app
 
 # Expose port (Cloud Run will set PORT environment variable)
-EXPOSE $PORT
+EXPOSE 8080
 
 # Set environment variables
 ENV PYTHONPATH=/app
 
-# Run the application (use PORT environment variable)
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+# Run the application (use PORT environment variable with shell expansion)
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
