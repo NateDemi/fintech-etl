@@ -100,12 +100,13 @@ async def ingest_csv(
         background_tasks=background_tasks,
         gcs_bucket=settings.gcs_bucket,
         intake_token=(settings.intake_token or ""),  # empty means "no auth"
-        process_csv_direct_func=lambda csv_bytes, gcs_path, gcs_bucket, google_drive_url=None: process_csv_from_bytes(
+        process_csv_direct_func=lambda csv_bytes, gcs_path, gcs_bucket, google_drive_url=None, gmail_id=None: process_csv_from_bytes(
             csv_bytes=csv_bytes,
             gcs_path=gcs_path,
             gcs_bucket=gcs_bucket,
             human_source_url=google_drive_url,
             webhook=webhook_client,
+            gmail_id=gmail_id,
         ),
     )
 

@@ -81,7 +81,7 @@ async def ingest_csv_handler(
         async def process_wrapper():
             try:
                 logger.info("⚙️ Background task started - calling process_csv_direct_func")
-                result = await process_csv_direct_func(contents, object_name, gcs_bucket, google_drive_url)
+                result = await process_csv_direct_func(contents, object_name, gcs_bucket, google_drive_url, gmail_id)
                 logger.info(f"✅ Background processing completed. Result: {result}")
             except Exception as e:
                 logger.error(f"❌ Background processing failed: {e}", exc_info=True)

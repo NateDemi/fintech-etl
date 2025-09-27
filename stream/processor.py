@@ -5,7 +5,7 @@ import pandas as pd
 import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
-from .schema import ReceiptData, LineItem, ProcessedReceipt
+from .schema import LineItem, ProcessedReceipt
 
 logger = logging.getLogger(__name__)
 
@@ -15,122 +15,82 @@ class CSVToReceiptProcessor:
     def __init__(self, gcs_bucket: str):
         self.gcs_bucket = gcs_bucket
     
-    def process_vendor_invoice(self, csv_data: pd.DataFrame, gcs_path: str, google_drive_url: str = None) -> ProcessedReceipt:
-        """Transform vendor invoice CSV data to receipt schema"""
-        # Group by invoice to create receipt data
-        invoice_groups = csv_data.groupby('Invoice Number')
+    def _generate_unique_document_id(self, gmail_id: str) -> str:
+        """Generate unique document ID: fnt-{gmail_id}-{timestamp_seconds}"""
+        if not gmail_id:
+            raise ValueError("gmail_id is required for document ID generation")
         
-        receipts = []
-        for invoice_number, invoice_data in invoice_groups:
-            receipt = self._create_receipt_from_invoice(invoice_data, invoice_number, gcs_path, google_drive_url)
-            receipts.append(receipt)
+        # Get current timestamp in seconds since epoch
+        timestamp = int(datetime.now().timestamp())
         
-        return receipts[0] if receipts else None
+        # Format: fnt-{gmail_id}-{timestamp}
+        return f"fnt-{gmail_id}-{timestamp}"
     
-    def _create_receipt_from_invoice(self, invoice_data: pd.DataFrame, invoice_number: str, gcs_path: str, google_drive_url: str = None) -> ProcessedReceipt:
+    def process_vendor_invoice(self, csv_data: pd.DataFrame, gcs_path: str, google_drive_url: str = None, gmail_id: str = None) -> Optional[ProcessedReceipt]:
+        """Transform vendor invoice CSV data to receipt schema"""
+        if csv_data.empty:
+            return None
+            
+        first_row = csv_data.iloc[0]
+        invoice_number = str(first_row.get('Invoice Number', ''))
+        
+        return self._create_receipt_from_invoice(csv_data, invoice_number, gcs_path, google_drive_url, gmail_id)
+    
+    def _create_receipt_from_invoice(self, invoice_data: pd.DataFrame, invoice_number: str, gcs_path: str, google_drive_url: str = None, gmail_id: str = None) -> ProcessedReceipt:
         """Create a single receipt from invoice data"""
         
-        # Get invoice-level data (should be same for all rows)
         first_row = invoice_data.iloc[0]
         
-        # Create line items from invoice data
         line_items = []
         for _, row in invoice_data.iterrows():
             line_item = self._create_line_item_from_row(row)
             line_items.append(line_item)
         
-        # Calculate totals
         total_amount = float(first_row.get('Invoice Amount', 0))
         item_count = len(line_items)
-        subtotal = sum(item.price * item.qty for item in line_items)
-        sales_tax = max(0, total_amount - subtotal)  # Assume difference is tax
         
-        # Create receipt data with detailed source information
-        # Extract Gmail ID from gcs_path (format: intake/YYYYMMDD_gmail_id_filename.csv)
-        path_parts = gcs_path.split('/')[-1].split('_')  # Get filename and split by underscore
-        gmail_id = path_parts[1] if len(path_parts) >= 2 else "unknown"
-        received_date = path_parts[0] if len(path_parts) >= 1 else "unknown"
-        original_filename = '_'.join(path_parts[2:]) if len(path_parts) >= 3 else gcs_path.split('/')[-1]
+        subtotal = sum(float(row.get('Extended Price', 0)) for _, row in invoice_data.iterrows())
+        sales_tax = float(first_row.get('Tax Adjustment Total', 0))
+        source_file = google_drive_url if google_drive_url else f"gs://{self.gcs_bucket}/{gcs_path}"
         
-        if google_drive_url and google_drive_url.strip():
-            final_google_drive_url = google_drive_url.strip()
-            logger.info(f"🔗 Using real Google Drive URL from AppleScript: {final_google_drive_url}")
-        else:
-            # Fallback: use GCS path instead of fake Google Drive URL
-            final_google_drive_url = f"gs://{self.gcs_bucket}/{gcs_path}"
-            logger.warning(f"⚠️ No real Google Drive URL provided, using GCS path: {final_google_drive_url}")
+        # Generate unique document ID
+        if not gmail_id:
+            raise ValueError("gmail_id is required from Apps Script payload")
         
-        source_info = {
-            "gcs_path": f"gs://{self.gcs_bucket}/{gcs_path}",
-            "gmail_id": gmail_id,
-            "received_date": received_date,
-            "original_filename": original_filename,
-            "source_type": "gmail_attachment",
-            "google_drive_url": final_google_drive_url
-        }
+        unique_document_id = self._generate_unique_document_id(gmail_id)
         
-        receipt_data = ReceiptData(
-            source_file=source_info["google_drive_url"],
-            receiptId=str(invoice_number),
-            vendor=first_row.get('Vendor Name', 'Unknown Vendor'),
-            date=self._parse_date(first_row.get('Invoice Date', '')).isoformat(),
-            totalAmount=total_amount,
-            salesTax=sales_tax,
-            subtotal=subtotal,
-            itemCount=item_count,
-            lineItems=line_items
-        )
-        
-        # Convert to processed receipt
         return ProcessedReceipt(
-            receipt_id=receipt_data.receiptId,
-            vendor=receipt_data.vendor,
-            transaction_date=receipt_data.date,
-            total_amount=receipt_data.totalAmount,
-            sales_tax=receipt_data.salesTax,
-            subtotal=receipt_data.subtotal,
-            item_count=receipt_data.itemCount,
-            line_items=receipt_data.lineItems,
-            source_file=receipt_data.source_file,
+            receipt_id=invoice_number,
+            vendor=first_row.get('Vendor Name', 'Unknown Vendor'),
+            transaction_date=self._parse_date(first_row.get('Invoice Date', '')),
+            total_amount=total_amount,
+            sales_tax=sales_tax,
+            subtotal=subtotal,
+            item_count=item_count,
+            line_items=line_items,
+            source_file=source_file,
             processed_at=datetime.now().isoformat(),
             gcs_bucket=self.gcs_bucket,
-            gcs_path=gcs_path
+            gcs_path=gcs_path,
+            document_id=unique_document_id
         )
     
     def _create_line_item_from_row(self, row: pd.Series) -> LineItem:
         """Create a line item from a CSV row"""
-        
-        # Extract product information
         product_description = str(row.get('Product Description', ''))
         product_number = str(row.get('Product Number', ''))
         
-        # Parse quantity and price
-        quantity = self._parse_quantity(row.get('Quantity', 0))
-        price = float(row.get('Invoice Line Item Cost', 0))
-        
-        # Extract UPC
-        upc = self._extract_upc(row)
-        
-        # Determine category from Product Class field
-        category = self._determine_category(row.get('Product Class', ''), product_description)
-        
-        # Extract unit of measure
-        unit_of_measure = self._extract_unit_of_measure(row.get('Unit Of Measure', ''))
-        
-        # Calculate discount (if any adjustments exist)
-        discount = self._calculate_discount(row)
-        
         return LineItem(
             name=product_description,
-            qty=quantity,
-            price=price,
-            discount=discount,
-            upc=upc,
-            sku=product_number if product_number != 'nan' else None,
+            qty=self._calculate_quantity(row),
+            price=float(row.get('Extended Price', 0)),
+            discount=float(row.get('Discount Adjustment Total', 0)),
+            upc=self._extract_upc(row),
+            sku=self._format_sku(row.get('Case UPC', '')),
             text=product_description,
-            unitOfMeasure=unit_of_measure,
-            category=category,
-            tax=0,  # Tax is calculated at receipt level
+            unitOfMeasure=self._extract_unit_of_measure(row.get('Unit Of Measure', '')),
+            category=row.get('Product Class', 'Other'),
+            tax=0,
             notes=self._extract_notes(row)
         )
     
@@ -149,58 +109,46 @@ class CSVToReceiptProcessor:
             except ValueError:
                 return date.today()
     
-    def _parse_quantity(self, qty_str) -> int:
-        """Parse quantity string to integer"""
+    def _extract_email_id(self, gcs_path: str) -> str:
+        """Extract email ID from GCS path"""
         try:
-            if qty_str and str(qty_str) != 'nan':
-                qty = int(float(qty_str))
-                return qty if qty > 0 else 1  # Ensure at least 1 for receipt schema
-            return 1
-        except (ValueError, TypeError):
-            return 1
+            filename = gcs_path.split('/')[-1]
+            parts = filename.split('_')
+            return parts[1] if len(parts) >= 2 else "unknown"
+        except:
+            return "unknown"
+    
+    def _calculate_quantity(self, row: pd.Series) -> int:
+        """Calculate quantity: Quantity × Packs Per Case (if Packs Per Case is not null or 0)"""
+        quantity = float(row.get('Quantity', 0)) or 1
+        packs_per_case = float(row.get('Packs Per Case', 0)) or 0
+        
+        if packs_per_case > 0:
+            quantity = quantity * packs_per_case
+        
+        return int(quantity)
+    
+    def _format_sku(self, case_upc: str) -> Optional[str]:
+        """Format SKU with leading zeros (14 digits)"""
+        if not case_upc or str(case_upc) == 'nan' or not str(case_upc).strip():
+            return None
+        
+        upc = str(case_upc).strip()
+        upc = upc.zfill(14)
+        return upc[:14]
     
     def _extract_upc(self, row: pd.Series) -> Optional[str]:
-        """Extract UPC from various UPC fields"""
-        upc_fields = ['Case UPC', 'Clean UPC', 'Pack UPC']
+        """Extract UPC with priority: Pack UPC → Clean UPC → Case UPC"""
+        upc_fields = ['Pack UPC', 'Clean UPC', 'Case UPC']
         
         for field in upc_fields:
             upc = str(row.get(field, ''))
             if upc and upc != 'nan' and upc.strip():
-                # Clean up UPC (remove leading zeros, ensure 12 digits)
-                upc = upc.strip().lstrip('0')
-                if len(upc) < 12:
-                    upc = upc.zfill(12)
-                return upc[:12]  # Ensure 12 digits max
+                upc = upc.strip()
+                upc = upc.zfill(14)
+                return upc[:14]  # Ensure 14 digits max
         
         return None
-    
-    def _determine_category(self, product_class: str, product_description: str) -> str:
-        """Determine product category from Product Class field and description"""
-        # First try Product Class field
-        if product_class and str(product_class) != 'nan':
-            class_lower = str(product_class).lower()
-            if 'beer' in class_lower:
-                return 'Beverages'
-            elif 'spirit' in class_lower:
-                return 'Beverages'
-            elif 'non-alcoholic' in class_lower:
-                return 'Beverages'
-            elif 'nonalcohol' in class_lower:
-                return 'Beverages'
-        
-        # Fallback to description analysis
-        desc_lower = product_description.lower()
-        
-        if any(word in desc_lower for word in ['beer', 'ale', 'lager', 'ipa', 'stout']):
-            return 'Beverages'
-        elif any(word in desc_lower for word in ['wine', 'spirit', 'liquor']):
-            return 'Beverages'
-        elif any(word in desc_lower for word in ['snack', 'chip', 'cracker']):
-            return 'Snacks'
-        elif any(word in desc_lower for word in ['candy', 'chocolate', 'sweet']):
-            return 'Candy'
-        else:
-            return 'Other'
     
     def _extract_unit_of_measure(self, uom: str) -> str:
         """Extract unit of measure"""
@@ -219,31 +167,13 @@ class CSVToReceiptProcessor:
     
     def _calculate_discount(self, row: pd.Series) -> float:
         """Calculate total discount from adjustment fields"""
-        discount_fields = [
-            'Discount Adjustment Total',
-            'DepositAdjustmentTotal',
-            'Miscellaneous Adjustment Total'
-        ]
-        
-        total_discount = 0
-        for field in discount_fields:
-            try:
-                value = float(row.get(field, 0))
-                if value < 0: 
-                    total_discount += abs(value)
-            except (ValueError, TypeError):
-                continue
-        
-        return total_discount
+        return float(row.get('Discount Adjustment Total', 0))
     
     def _extract_notes(self, row: pd.Series) -> Optional[str]:
         """Extract notes from adjustment fields"""
         notes = []
-        
         if float(row.get('Discount Adjustment Total', 0)) != 0:
             notes.append(f"Discount: {row.get('Discount Adjustment Total', 0)}")
-        
         if float(row.get('DepositAdjustmentTotal', 0)) != 0:
             notes.append(f"Deposit: {row.get('DepositAdjustmentTotal', 0)}")
-        
         return '; '.join(notes) if notes else None

@@ -16,17 +16,6 @@ class LineItem(BaseModel):
     tax: float = Field(default=0, description="Tax amount for the item")
     notes: Optional[str] = Field(None, description="Additional notes")
 
-class ReceiptData(BaseModel):
-    source_file: str = Field(..., description="GCS path to source file")
-    receiptId: str = Field(..., description="Unique receipt identifier")
-    vendor: str = Field(..., description="Vendor name")
-    date: str = Field(..., description="Transaction date in YYYY-MM-DD format")
-    totalAmount: float = Field(..., description="Total amount paid")
-    salesTax: float = Field(default=0, description="Sales tax amount")
-    subtotal: float = Field(..., description="Total before tax")
-    itemCount: int = Field(..., description="Count of distinct items")
-    lineItems: List[LineItem] = Field(..., description="Line items")
-
 class ProcessedReceipt(BaseModel):
     """Processed receipt ready for storage"""
     receipt_id: str
@@ -41,3 +30,4 @@ class ProcessedReceipt(BaseModel):
     processed_at: str
     gcs_bucket: str
     gcs_path: str
+    document_id: str = "unknown"  # Email ID extracted from GCS path
