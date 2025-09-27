@@ -19,10 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY stream/ ./stream/
 COPY intake/ ./intake/
+COPY start.sh .
 
-# Create non-root user
+# Create non-root user and make start script executable
 RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
+    && chown -R app:app /app \
+    && chmod +x /app/start.sh
 USER app
 
 # Expose port (Cloud Run will set PORT environment variable)
@@ -31,5 +33,5 @@ EXPOSE 8080
 # Set environment variables
 ENV PYTHONPATH=/app
 
-# Run the application (use PORT environment variable with shell expansion)
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Run the application using the startup script
+CMD ["./start.sh"]
