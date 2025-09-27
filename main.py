@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, BackgroundTasks, Body, Depends
 from google.cloud import storage
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, Field
 
 # Core processing utilities (your simplified module)
 from stream.util import WebhookClient, process_csv_from_bytes, process_csv_from_gcs
@@ -29,10 +29,10 @@ logger.info("🚀 Starting Fintech ETL Service")
 # Settings
 # -----------------------------------------------------------------------------
 class Settings(BaseSettings):
-    gcs_bucket: str  # e.g., "fintech-inbox"
-    webhook_url: Optional[str] = None
-    webhook_headers: dict = {}
-    intake_token: str | None = None  # optional bearer for /ingest (recommended in prod)
+    gcs_bucket: str = Field(alias="GCS_BUCKET")  # e.g., "fintech-inbox"
+    webhook_url: Optional[str] = Field(default=None, alias="WEBHOOK_URL")
+    webhook_headers: dict = Field(default={}, alias="WEBHOOK_HEADERS")
+    intake_token: Optional[str] = Field(default=None, alias="INTAKE_TOKEN")  # optional bearer for /ingest (recommended in prod)
 
     @field_validator("webhook_headers", mode="before")
     @classmethod
