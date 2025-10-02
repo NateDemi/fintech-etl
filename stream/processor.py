@@ -116,12 +116,14 @@ class CSVToReceiptProcessor:
             return "unknown"
     
     def _calculate_quantity(self, row: pd.Series) -> int:
-        """Calculate quantity: Quantity × Packs Per Case (if Packs Per Case is not null or 0)"""
+        """Calculate quantity: Quantity × Packs Per Case (if not zero), otherwise Quantity × 1"""
         quantity = float(row.get('Quantity', 0)) or 1
         packs_per_case = float(row.get('Packs Per Case', 0)) or 0
         
-        if packs_per_case > 0:
+        if packs_per_case != 0:
             quantity = quantity * packs_per_case
+        else:
+            quantity = quantity * 1  
         
         return int(quantity)
     
