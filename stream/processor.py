@@ -33,7 +33,9 @@ class CSVToReceiptProcessor:
         receipts = []
         
         for invoice_number, invoice_data in invoice_groups:
-            receipt = self._create_receipt_from_invoice(invoice_data, invoice_number, gcs_path, google_drive_url, gmail_id)
+            # Ensure invoice_number is a string
+            invoice_number_str = str(invoice_number)
+            receipt = self._create_receipt_from_invoice(invoice_data, invoice_number_str, gcs_path, google_drive_url, gmail_id)
             receipts.append(receipt)
         
         return receipts
