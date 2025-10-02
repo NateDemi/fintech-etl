@@ -15,26 +15,28 @@ class CSVToReceiptProcessor:
     def __init__(self, gcs_bucket: str):
         self.gcs_bucket = gcs_bucket
     
-    def _generate_unique_document_id(self, gmail_id: str) -> str:
-        """Generate unique document ID: fnt-{gmail_id}-{timestamp_seconds}"""
-        if not gmail_id:
-            raise ValueError("gmail_id is required for document ID generation")
-        
-        # Get current timestamp in seconds since epoch
+    def _generate_document_id(self, gmail_id: str, invoice_number: str = None) -> str:
+        """Generate unique document ID: fnt-{gmail_id}-{invoice_number}-{timestamp_seconds}"""
         timestamp = int(datetime.now().timestamp())
-        
-        # Format: fnt-{gmail_id}-{timestamp}
-        return f"fnt-{gmail_id}-{timestamp}"
+        if invoice_number:
+            return f"fnt-{gmail_id}-{invoice_number}-{timestamp}"
+        else:
+            return f"fnt-{gmail_id}-{timestamp}"
     
-    def process_vendor_invoice(self, csv_data: pd.DataFrame, gcs_path: str, google_drive_url: str = None, gmail_id: str = None) -> Optional[ProcessedReceipt]:
-        """Transform vendor invoice CSV data to receipt schema"""
+    def process_vendor_invoice(self, csv_data: pd.DataFrame, gcs_path: str, google_drive_url: str = None, gmail_id: str = None) -> List[ProcessedReceipt]:
+        """Transform vendor invoice CSV data to receipt schema - handles multiple invoices"""
         if csv_data.empty:
-            return None
-            
-        first_row = csv_data.iloc[0]
-        invoice_number = str(first_row.get('Invoice Number', ''))
+            return []
         
-        return self._create_receipt_from_invoice(csv_data, invoice_number, gcs_path, google_drive_url, gmail_id)
+        # Group by Invoice Number to handle multiple invoices in one CSV
+        invoice_groups = csv_data.groupby('Invoice Number')
+        receipts = []
+        
+        for invoice_number, invoice_data in invoice_groups:
+            receipt = self._create_receipt_from_invoice(invoice_data, invoice_number, gcs_path, google_drive_url, gmail_id)
+            receipts.append(receipt)
+        
+        return receipts
     
     def _create_receipt_from_invoice(self, invoice_data: pd.DataFrame, invoice_number: str, gcs_path: str, google_drive_url: str = None, gmail_id: str = None) -> ProcessedReceipt:
         """Create a single receipt from invoice data"""
@@ -52,12 +54,7 @@ class CSVToReceiptProcessor:
         subtotal = sum(float(row.get('Extended Price', 0)) for _, row in invoice_data.iterrows())
         sales_tax = float(first_row.get('Tax Adjustment Total', 0))
         source_file = google_drive_url if google_drive_url else f"gs://{self.gcs_bucket}/{gcs_path}"
-        
-        # Generate unique document ID
-        if not gmail_id:
-            raise ValueError("gmail_id is required from Apps Script payload")
-        
-        unique_document_id = self._generate_unique_document_id(gmail_id)
+        unique_document_id = self._generate_document_id(gmail_id, invoice_number)
         
         return ProcessedReceipt(
             receipt_id=invoice_number,

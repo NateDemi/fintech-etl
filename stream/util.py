@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from io import StringIO
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 import aiohttp
 import pandas as pd
@@ -56,6 +57,7 @@ class WebhookClient:
                         logger.error("❌ Webhook ERROR status=%s body=%s", resp.status, text)
         except Exception as e:
             logger.error(f"💥 Webhook send FAILED: {e}", exc_info=True)
+
 
 
 def to_webhook_schema(r: ProcessedReceipt) -> dict:
@@ -113,10 +115,10 @@ async def process_csv_from_bytes(
     human_source_url: Optional[str],
     webhook: WebhookClient,
     gmail_id: Optional[str] = None,
-) -> Optional[ProcessedReceipt]:
+) -> List[ProcessedReceipt]:
     """
     Process a CSV already in memory and optionally send it to a webhook.
-    Returns the ProcessedReceipt (or None if no data).
+    Returns a list of ProcessedReceipt objects (one per invoice).
     """
     try:
         logger.info(f"🔄 Starting CSV processing for path: {gcs_path}")
@@ -129,29 +131,35 @@ async def process_csv_from_bytes(
         logger.info(f"📋 CSV columns: {list(df.columns)}")
 
         processor = CSVToReceiptProcessor(gcs_bucket)
-        logger.info("⚙️ Processing vendor invoice...")
-        receipt = processor.process_vendor_invoice(df, gcs_path, human_source_url, gmail_id)
+        logger.info("⚙️ Processing vendor invoices...")
+        receipts = processor.process_vendor_invoice(df, gcs_path, human_source_url, gmail_id)
         
-        if not receipt:
-            logger.warning("⚠️ No receipt produced for %s", gcs_path)
-            return None
+        if not receipts:
+            logger.warning("⚠️ No receipts produced for %s", gcs_path)
+            return []
 
-        logger.info(f"✅ Receipt created: ID={receipt.receipt_id}, Vendor={receipt.vendor}")
-        _ensure_source_fields(receipt, gcs_bucket, gcs_path, human_source_url)
-        logger.info(f"🔗 Source file set to: {receipt.source_file}")
+        logger.info(f"✅ Created {len(receipts)} receipts from CSV")
+        
+        # Process all receipts
+        for i, receipt in enumerate(receipts, 1):
+            logger.info(f"📄 Processing receipt {i}/{len(receipts)}: ID={receipt.receipt_id}, Vendor={receipt.vendor}")
+            _ensure_source_fields(receipt, gcs_bucket, gcs_path, human_source_url)
+            logger.info(f"🔗 Source file set to: {receipt.source_file}")
+            logger.info(f"🎉 Processing completed successfully for receipt {receipt.receipt_id}")
 
-        if webhook.is_configured():
-            logger.info("🚀 Sending receipt to webhook...")
-            await webhook.send(receipt)
-        else:
-            logger.warning("⚠️ Webhook not configured - skipping send")
+        # Send each receipt individually
+        for i, receipt in enumerate(receipts, 1):
+            if webhook.is_configured():
+                logger.info(f"🚀 Sending receipt {i}/{len(receipts)} to webhook...")
+                await webhook.send(receipt)
+            else:
+                logger.warning("⚠️ Webhook not configured - skipping send")
             
-        logger.info(f"🎉 Processing completed successfully for receipt {receipt.receipt_id}")
-        return receipt
+        return receipts
 
     except Exception as e:
         logger.error(f"💥 Failed processing {gcs_path}: {e}", exc_info=True)
-        return None
+        return []
 
 
 async def process_csv_from_gcs(
