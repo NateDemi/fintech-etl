@@ -27,6 +27,10 @@ real_webhook_payload.json
 test_vendor_invoice.csv
 00246328_20250919224656969*.csv
 
+# Local CSV files
+*.csv
+!requirements.txt
+
 # Logs
 *.log
 logs/
