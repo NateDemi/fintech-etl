@@ -30,8 +30,8 @@ class QuantityRule(BaseRule):
         if qty <= 0:
             return 0
 
-        uom = self._text(row, "Unit Of Measure")
-        if uom == "BO":  # bottle → take quantity as-is
+        uom = self._extract_unit_of_measure(row.get("Unit Of Measure", ""))
+        if uom == "bottle":  # bottle → take quantity as-is
             return int(qty)
 
         category = self._identify_product_category(row)
