@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 from .schema import LineItem, ProcessedReceipt
-from rules import QuantityRule, PriceRule, InvoiceRule, CodeRule
+from rules import QuantityRule, PriceRule, InvoiceRule, ItemRule
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +16,10 @@ class CSVToReceiptProcessor:
     
     def __init__(self, gcs_bucket: str):
         self.gcs_bucket = gcs_bucket
-        self.quantity_rule = QuantityRule()
+        self.item_rule = ItemRule()
+        self.quantity_rule = QuantityRule(item_rule=self.item_rule)
         self.price_rule = PriceRule()
         self.invoice_rule = InvoiceRule()
-        self.code_rule = CodeRule()
     
     def _generate_document_id(self, gmail_id: str, invoice_number: str = None) -> str:
         """Generate unique document ID: fnt-{gmail_id}-{invoice_number}-{timestamp_seconds}"""
@@ -83,18 +83,18 @@ class CSVToReceiptProcessor:
     
     def _create_line_item_from_row(self, row: pd.Series) -> LineItem:
         """Create a line item from a CSV row"""
-        product_description = str(row.get('Product Description', ''))
-        product_number = str(row.get('Product Number', ''))
+        product_description = self.item_rule.get_item_name(row)
+        product_number = self.item_rule.get_item_number(row)
         
         return LineItem(
             name=product_description,
             qty=self._calculate_quantity(row),
             price=self.price_rule.get_extended_price(row),
             discount=self.price_rule.get_discount_amount(row),
-            upc=self.code_rule.extract_upc(row),
-            sku=self.code_rule.format_sku(row.get('Case UPC', '')),
+            upc=self.item_rule.extract_upc(row),
+            sku=self.item_rule.format_sku(row.get('Case UPC', '')),
             text=product_description,
-            unitOfMeasure=self.quantity_rule._extract_unit_of_measure(row.get('Unit Of Measure', '')),
+            unitOfMeasure=self.item_rule._extract_unit_of_measure(row.get('Unit Of Measure', '')),
             category=self.quantity_rule._identify_product_category(row),
             tax=self.price_rule.get_tax_amount(row),
             notes=self._extract_notes(row)

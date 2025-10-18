@@ -1,10 +1,3 @@
-"""
-Quantity Calculation Rules
-
-This module contains business logic for calculating quantities based on
-product categories, packaging, and other business factors.
-"""
-
 import pandas as pd
 from typing import Dict, Set
 from .base import BaseRule
@@ -13,7 +6,9 @@ from .base import BaseRule
 class QuantityRule(BaseRule):
     """Handles quantity calculation logic for different product categories."""
     
-    # Pack sizes that should multiply by Units Per Pack (category-specific)
+    def __init__(self, item_rule=None):
+        self.item_rule = item_rule
+    
     SPECIAL_PACK_SIZES: Dict[str, Set[int]] = {
         BaseRule.BEER: {12, 24},
         BaseRule.WINE: set(),  # Wine only uses packs per case
@@ -62,7 +57,10 @@ class QuantityRule(BaseRule):
         
         # Beer special rule: if 12 or 24 packs per case, multiply by Units Per Pack
         if int(packs) in self.SPECIAL_PACK_SIZES[self.BEER]:
-            units = self._num(row, "Units Per Pack", 1) or 1
+            if self.item_rule:
+                units = self.item_rule.get_units_per_pack(row)
+            else:
+                units = self._num(row, "Units Per Pack", 1) or 1
             return int(qty * packs * units)
         
         # Standard beer calculation
@@ -107,4 +105,5 @@ class QuantityRule(BaseRule):
     def _get_packs_per_case(self, row: pd.Series) -> int:
         """Get Packs Per Case from CSV data."""
         return int(self._num(row, "Packs Per Case", 1) or 1)
+    
     

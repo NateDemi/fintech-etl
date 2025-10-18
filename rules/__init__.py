@@ -19,12 +19,12 @@ from .base import BaseRule
 from .quantity import QuantityRule
 from .price import PriceRule
 from .invoice import InvoiceRule
-from .code import CodeRule
+from .item import ItemRule
 
 __all__ = [
     'BaseRule',
     'QuantityRule', 
     'PriceRule',
     'InvoiceRule',
-    'CodeRule'
+    'ItemRule'
 ]
