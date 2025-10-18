@@ -6,14 +6,19 @@ import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 from .schema import LineItem, ProcessedReceipt
+from rules import QuantityRule, PriceRule, InvoiceRule
 
 logger = logging.getLogger(__name__)
+
 
 class CSVToReceiptProcessor:
     """Processes vendor invoice CSV data and transforms it to receipt schema"""
     
     def __init__(self, gcs_bucket: str):
         self.gcs_bucket = gcs_bucket
+        self.quantity_rule = QuantityRule()
+        self.price_rule = PriceRule()
+        self.invoice_rule = InvoiceRule()
     
     def _generate_document_id(self, gmail_id: str, invoice_number: str = None) -> str:
         """Generate unique document ID: fnt-{gmail_id}-{invoice_number}-{timestamp_seconds}"""
@@ -33,8 +38,9 @@ class CSVToReceiptProcessor:
         receipts = []
         
         for invoice_number, invoice_data in invoice_groups:
-            # Ensure invoice_number is a string
-            invoice_number_str = str(invoice_number)
+            # Get invoice number using InvoiceRule for consistency
+            first_row = invoice_data.iloc[0]
+            invoice_number_str = self.invoice_rule.get_invoice_number(first_row)
             receipt = self._create_receipt_from_invoice(invoice_data, invoice_number_str, gcs_path, google_drive_url, gmail_id)
             receipts.append(receipt)
         
@@ -50,18 +56,18 @@ class CSVToReceiptProcessor:
             line_item = self._create_line_item_from_row(row)
             line_items.append(line_item)
         
-        total_amount = float(first_row.get('Invoice Amount', 0))
+        total_amount = self.invoice_rule.get_invoice_amount(first_row)
         item_count = len(line_items)
         
-        subtotal = sum(float(row.get('Extended Price', 0)) for _, row in invoice_data.iterrows())
-        sales_tax = float(first_row.get('Tax Adjustment Total', 0))
+        subtotal = sum(self.price_rule.get_extended_price(row) for _, row in invoice_data.iterrows())
+        sales_tax = self.price_rule.get_tax_amount(first_row)
         source_file = google_drive_url if google_drive_url else f"gs://{self.gcs_bucket}/{gcs_path}"
         unique_document_id = self._generate_document_id(gmail_id, invoice_number)
         
         return ProcessedReceipt(
             receipt_id=invoice_number,
-            vendor=first_row.get('Vendor Name', 'Unknown Vendor'),
-            transaction_date=self._parse_date(first_row.get('Invoice Date', '')),
+            vendor=self.invoice_rule.get_vendor_name(first_row),
+            transaction_date=self.invoice_rule._parse_date(self.invoice_rule.get_invoice_date(first_row)),
             total_amount=total_amount,
             sales_tax=sales_tax,
             subtotal=subtotal,
@@ -82,31 +88,17 @@ class CSVToReceiptProcessor:
         return LineItem(
             name=product_description,
             qty=self._calculate_quantity(row),
-            price=float(row.get('Extended Price', 0)),
-            discount=float(row.get('Discount Adjustment Total', 0)),
+            price=self.price_rule.get_extended_price(row),
+            discount=self.price_rule.get_discount_amount(row),
             upc=self._extract_upc(row),
             sku=self._format_sku(row.get('Case UPC', '')),
             text=product_description,
-            unitOfMeasure=self._extract_unit_of_measure(row.get('Unit Of Measure', '')),
-            category=row.get('Product Class', 'Other'),
-            tax=0,
+            unitOfMeasure=self.quantity_rule._extract_unit_of_measure(row.get('Unit Of Measure', '')),
+            category=self.quantity_rule._identify_product_category(row),
+            tax=self.price_rule.get_tax_amount(row),
             notes=self._extract_notes(row)
         )
     
-    def _parse_date(self, date_str: str) -> date:
-        """Parse date string to date object"""
-        if not date_str or date_str == 'nan':
-            return date.today()
-        
-        try:
-            # Try MM/DD/YYYY format
-            return datetime.strptime(date_str, '%m/%d/%Y').date()
-        except ValueError:
-            try:
-                # Try YYYY-MM-DD format
-                return datetime.strptime(date_str, '%Y-%m-%d').date()
-            except ValueError:
-                return date.today()
     
     def _extract_email_id(self, gcs_path: str) -> str:
         """Extract email ID from GCS path"""
@@ -118,16 +110,8 @@ class CSVToReceiptProcessor:
             return "unknown"
     
     def _calculate_quantity(self, row: pd.Series) -> int:
-        """Calculate quantity: Quantity × Packs Per Case (if not zero), otherwise Quantity × 1"""
-        quantity = float(row.get('Quantity', 0)) or 1
-        packs_per_case = float(row.get('Packs Per Case', 0)) or 0
-        
-        if packs_per_case != 0:
-            quantity = quantity * packs_per_case
-        else:
-            quantity = quantity * 1  
-        
-        return int(quantity)
+        """Calculate total quantity using QuantityRule."""
+        return self.quantity_rule.calculate_quantity(row)
     
     def _format_sku(self, case_upc: str) -> Optional[str]:
         """Format SKU with leading zeros (14 digits)"""
@@ -151,30 +135,21 @@ class CSVToReceiptProcessor:
         
         return None
     
-    def _extract_unit_of_measure(self, uom: str) -> str:
-        """Extract unit of measure"""
-        if not uom or str(uom) == 'nan':
-            return 'unit'
-        
-        uom_lower = str(uom).lower()
-        if 'oz' in uom_lower:
-            return 'oz'
-        elif 'ct' in uom_lower or 'count' in uom_lower:
-            return 'ct'
-        elif 'pack' in uom_lower:
-            return 'pack'
-        else:
-            return 'unit'
-    
-    def _calculate_discount(self, row: pd.Series) -> float:
-        """Calculate total discount from adjustment fields"""
-        return float(row.get('Discount Adjustment Total', 0))
-    
     def _extract_notes(self, row: pd.Series) -> Optional[str]:
         """Extract notes from adjustment fields"""
         notes = []
-        if float(row.get('Discount Adjustment Total', 0)) != 0:
-            notes.append(f"Discount: {row.get('Discount Adjustment Total', 0)}")
-        if float(row.get('DepositAdjustmentTotal', 0)) != 0:
-            notes.append(f"Deposit: {row.get('DepositAdjustmentTotal', 0)}")
+        discount = self.price_rule.get_discount_amount(row)
+        deposit = self.price_rule.get_deposit_amount(row)
+        misc = self.price_rule.get_miscellaneous_amount(row)
+        delivery = self.price_rule.get_delivery_amount(row)
+        
+        if discount != 0:
+            notes.append(f"Discount: {discount}")
+        if deposit != 0:
+            notes.append(f"Deposit: {deposit}")
+        if misc != 0:
+            notes.append(f"Misc: {misc}")
+        if delivery != 0:
+            notes.append(f"Delivery: {delivery}")
+            
         return '; '.join(notes) if notes else None
