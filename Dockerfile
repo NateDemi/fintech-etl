@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY stream/ ./stream/
 COPY intake/ ./intake/
+COPY rules/ ./rules/
 COPY start.sh .
 
 # Create non-root user and make start script executable
