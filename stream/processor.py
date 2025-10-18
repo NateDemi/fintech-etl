@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 from .schema import LineItem, ProcessedReceipt
-from rules import QuantityRule, PriceRule, InvoiceRule
+from rules import QuantityRule, PriceRule, InvoiceRule, CodeRule
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ class CSVToReceiptProcessor:
         self.quantity_rule = QuantityRule()
         self.price_rule = PriceRule()
         self.invoice_rule = InvoiceRule()
+        self.code_rule = CodeRule()
     
     def _generate_document_id(self, gmail_id: str, invoice_number: str = None) -> str:
         """Generate unique document ID: fnt-{gmail_id}-{invoice_number}-{timestamp_seconds}"""
@@ -90,8 +91,8 @@ class CSVToReceiptProcessor:
             qty=self._calculate_quantity(row),
             price=self.price_rule.get_extended_price(row),
             discount=self.price_rule.get_discount_amount(row),
-            upc=self._extract_upc(row),
-            sku=self._format_sku(row.get('Case UPC', '')),
+            upc=self.code_rule.extract_upc(row),
+            sku=self.code_rule.format_sku(row.get('Case UPC', '')),
             text=product_description,
             unitOfMeasure=self.quantity_rule._extract_unit_of_measure(row.get('Unit Of Measure', '')),
             category=self.quantity_rule._identify_product_category(row),
@@ -112,28 +113,6 @@ class CSVToReceiptProcessor:
     def _calculate_quantity(self, row: pd.Series) -> int:
         """Calculate total quantity using QuantityRule."""
         return self.quantity_rule.calculate_quantity(row)
-    
-    def _format_sku(self, case_upc: str) -> Optional[str]:
-        """Format SKU with leading zeros (14 digits)"""
-        if not case_upc or str(case_upc) == 'nan' or not str(case_upc).strip():
-            return None
-        
-        upc = str(case_upc).strip()
-        upc = upc.zfill(14)
-        return upc[:14]
-    
-    def _extract_upc(self, row: pd.Series) -> Optional[str]:
-        """Extract UPC with priority: Pack UPC → Clean UPC → Case UPC"""
-        upc_fields = ['Pack UPC', 'Clean UPC', 'Case UPC']
-        
-        for field in upc_fields:
-            upc = str(row.get(field, ''))
-            if upc and upc != 'nan' and upc.strip():
-                upc = upc.strip()
-                upc = upc.zfill(14)
-                return upc[:14]  # Ensure 14 digits max
-        
-        return None
     
     def _extract_notes(self, row: pd.Series) -> Optional[str]:
         """Extract notes from adjustment fields"""
