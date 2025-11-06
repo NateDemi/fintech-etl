@@ -42,6 +42,7 @@ class WebhookClient:
         logger.info(f"📦 Webhook payload prepared: {len(str(payload))} chars")
         logger.info(f"🎯 Sending to URL: {self.url}")
         logger.info(f"📋 Payload preview: {str(payload)[:200]}...")
+        logger.info(f"📦 LineItems in payload: {json.dumps(payload.get('lineItems', []), indent=2)}")
         
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
@@ -89,7 +90,7 @@ def to_webhook_schema(r: ProcessedReceipt) -> dict:
             }
             for li in r.line_items
         ],
-        "source_file": r.source_file,  # human link (Drive or gs://)
+        "source_file": r.source_file,
     }
 
 
