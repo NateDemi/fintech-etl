@@ -97,7 +97,9 @@ class CSVToReceiptProcessor:
             unitOfMeasure=self.item_rule._extract_unit_of_measure(row.get('Unit Of Measure', '')),
             category=self.quantity_rule._identify_product_category(row),
             tax=self.price_rule.get_tax_amount(row),
-            notes=self._extract_notes(row)
+            notes=self._extract_notes(row),
+            packs_per_case=self.quantity_rule.get_packs_per_case(row),
+            units_per_pack=self.quantity_rule.get_units_per_pack(row)
         )
     
     

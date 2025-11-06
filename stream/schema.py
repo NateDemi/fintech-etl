@@ -15,6 +15,8 @@ class LineItem(BaseModel):
     category: Optional[str] = Field(None, description="Product category")
     tax: float = Field(default=0, description="Tax amount for the item")
     notes: Optional[str] = Field(None, description="Additional notes")
+    packs_per_case: Optional[int] = Field(None, description="Packs per case from CSV")
+    units_per_pack: Optional[int] = Field(None, description="Units per pack from CSV")
 
 class ProcessedReceipt(BaseModel):
     """Processed receipt ready for storage"""
