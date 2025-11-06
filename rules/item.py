@@ -84,7 +84,6 @@ class ItemRule(BaseRule):
         """Format item name (trim, clean up)"""
         if not name or str(name) == 'nan' or str(name) == 'None':
             return ''
-        
         return str(name).strip()
     
     def get_product_volume(self, row: pd.Series) -> str:

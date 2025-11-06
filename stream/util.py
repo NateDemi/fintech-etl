@@ -84,6 +84,8 @@ def to_webhook_schema(r: ProcessedReceipt) -> dict:
                 "category": li.category,
                 "tax": li.tax,
                 "notes": li.notes,
+                "packs_per_case": li.packs_per_case,
+                "units_per_pack": li.units_per_pack,
             }
             for li in r.line_items
         ],
@@ -168,9 +170,11 @@ async def process_csv_from_gcs(
     gcs_bucket: str,
     webhook: WebhookClient,
     storage_client: storage.Client | None = None,
-) -> Optional[ProcessedReceipt]:
+    gmail_id: Optional[str] = None,
+) -> List[ProcessedReceipt]:
     """
     Download CSV from GCS, process, and optionally send to webhook.
+    Returns a list of ProcessedReceipt objects (one per invoice).
     """
     try:
         storage_client = storage_client or storage.Client()
@@ -180,17 +184,29 @@ async def process_csv_from_gcs(
         logger.info("GCS CSV loaded rows=%d cols=%d (path=%s)", len(df), len(df.columns), gcs_path)
 
         processor = CSVToReceiptProcessor(gcs_bucket)
-        receipt = processor.process_vendor_invoice(df, gcs_path, None)
-        if not receipt:
-            logger.warning("No receipt produced for %s", gcs_path)
-            return None
+        receipts = processor.process_vendor_invoice(df, gcs_path, None, gmail_id)
+        if not receipts:
+            logger.warning("No receipts produced for %s", gcs_path)
+            return []
 
-        _ensure_source_fields(receipt, gcs_bucket, gcs_path, None)
+        logger.info(f"✅ Created {len(receipts)} receipts from CSV")
 
-        if webhook.is_configured():
-            await webhook.send(receipt)
-        return receipt
+        # Process all receipts
+        for i, receipt in enumerate(receipts, 1):
+            logger.info(f"📄 Processing receipt {i}/{len(receipts)}: ID={receipt.receipt_id}, Vendor={receipt.vendor}")
+            _ensure_source_fields(receipt, gcs_bucket, gcs_path, None)
+            logger.info(f"🔗 Source file set to: {receipt.source_file}")
+
+        # Send each receipt individually
+        for i, receipt in enumerate(receipts, 1):
+            if webhook.is_configured():
+                logger.info(f"🚀 Sending receipt {i}/{len(receipts)} to webhook...")
+                await webhook.send(receipt)
+            else:
+                logger.warning("⚠️ Webhook not configured - skipping send")
+
+        return receipts
 
     except Exception as e:
         logger.exception("Failed GCS processing %s: %s", gcs_path, e)
-        return None
+        return []
